@@ -1,29 +1,29 @@
-# RAG Legal Document Generator - MVP Dependencies
+# RAG Legal Document Generator - MVP Dependencies (Simplified)
 
 # Core ML and NLP
-sentence-transformers==2.2.2
-chromadb==0.4.15
-numpy==1.24.3
-pandas==2.0.3
+sentence-transformers
+chromadb
+numpy
+pandas
 
 # PDF Processing
-PyMuPDF==1.23.8
-pdfplumber==0.9.0
+PyMuPDF
+pdfplumber
 
 # API and Web
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
-requests==2.31.0
+fastapi
+uvicorn
+pydantic
+requests
 
 # Google AI
-google-generativeai==0.3.2
+google-generativeai
 
 # Utilities
-python-dotenv==1.0.0
-tqdm==4.66.1
-loguru==0.7.2
+python-dotenv
+tqdm
+loguru
 
 # Development
-pytest==7.4.3
-black==23.11.0
+pytest
+black

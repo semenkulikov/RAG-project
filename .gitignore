@@ -7,6 +7,7 @@ __pycache__/
 *.so
 text.txt
 PROGRESS.md
+data/
 # Distribution / packaging
 .Python
 build/

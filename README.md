@@ -159,14 +159,46 @@ def generate_legal_document(
 git clone <repository_url>
 cd RAG-project
 
+# Создание виртуального окружения
+python -m venv venv
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/Mac
+
 # Установка зависимостей
 pip install -r requirements.txt
 
-# Настройка API ключей
-export GEMINI_API_KEY="your_api_key"
+# Настройка API ключей (создать .env файл)
+GEMINI_API_KEY=your_api_key_here
 
-# Запуск системы
+# Тестирование системы
+python quick_test.py
+
+# Запуск полного тестирования
+python full_pipeline_test.py
+
+# Запуск API сервера
 python main.py
+```
+
+## Тестирование компонентов
+
+### Быстрый тест системы
+```bash
+python quick_test.py
+```
+
+### Полное тестирование пайплайна
+```bash
+python full_pipeline_test.py
+```
+
+### Тестирование отдельных модулей
+```bash
+# Тест обработки данных
+python test_data_processor.py
+
+# Тест векторной базы данных
+python test_vector_db.py
 ```
 
 ## Использование

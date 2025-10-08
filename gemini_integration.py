@@ -1,0 +1,106 @@
+"""
+Модуль интеграции с LLM: Gemini 2.5 Pro с резервом OpenAI GPT-5
+Функции:
+- compose_prompt: создать промпт из фактов и найденных документов
+- generate_with_gemini: генерация через Gemini
+- generate_with_openai: резервная генерация через OpenAI
+- generate_legal_document: обертка с автоматическим фолбэком
+"""
+from typing import List, Dict, Any, Optional
+import os
+from loguru import logger
+from dotenv import load_dotenv
+
+import google.generativeai as genai
+import openai
+
+from config import GEMINI_API_KEY, OPENAI_API_KEY, GEMINI_MODEL, OPENAI_MODEL
+
+load_dotenv()
+
+# Configure clients
+if GEMINI_API_KEY:
+	genai.configure(api_key=GEMINI_API_KEY)
+else:
+	logger.warning("GEMINI_API_KEY is empty. Gemini calls will fail.")
+
+if OPENAI_API_KEY:
+	openai.api_key = OPENAI_API_KEY
+else:
+	logger.warning("OPENAI_API_KEY is empty. OpenAI fallback will fail.")
+
+def compose_prompt(case_description: str, similar_docs: List[Dict[str, Any]], document_type: str = "исковое заявление") -> str:
+	"""Формирует промпт для LLM на основе найденных документов.
+	Ожидается, что similar_docs — это список словарей, как из VectorDatabase.search_similar.
+	"""
+	context_lines: List[str] = []
+	for i, doc in enumerate(similar_docs[:10], 1):
+		meta = doc.get("metadata", {})
+		source = meta.get("source_file", "unknown")
+		chunk_type = meta.get("chunk_type", "legal_text")
+		context_lines.append(
+			f"Дело {i} (источник: {source}, тип: {chunk_type}):\n{doc.get('text','')[:1500]}"
+		)
+	context = "\n\n".join(context_lines) if context_lines else "Нет контекста"
+	
+	prompt = f"""
+Ты — опытный юрист-процессуалист. Составь {document_type} с подробной мотивировочной частью.
+
+ОБСТОЯТЕЛЬСТВА ДЕЛА:
+{case_description}
+
+РЕЛЕВАНТНАЯ СУДЕБНАЯ ПРАКТИКА (из найденных документов):
+{context}
+
+ТРЕБОВАНИЯ К ОТВЕТУ:
+1) Структура: вводная часть, обстоятельства, правовая квалификация, ссылки на нормы и позиции ВС РФ, просительная часть, приложения.
+2) В мотивировочной части опирайся на приведенные выдержки; цитируй нормы и правовые позиции явно.
+3) Стиль официальный, без воды. Русский язык. Укажи ссылки на источники (файл/позиция), если это уместно.
+4) Верни только финальный текст документа без пояснений.
+"""
+	return prompt.strip()
+
+
+def generate_with_gemini(prompt: str) -> str:
+	"""Генерация через Gemini."""
+	logger.info("Запрос к Gemini...")
+	model = genai.GenerativeModel(GEMINI_MODEL)
+	resp = model.generate_content(prompt)
+	return getattr(resp, "text", "") or (resp.candidates[0].content.parts[0].text if getattr(resp, "candidates", None) else "")
+
+
+def generate_with_openai(prompt: str) -> str:
+	"""Резервная генерация через OpenAI GPT-5."""
+	logger.info("Фолбэк в OpenAI GPT-5...")
+	# Унифицированный chat-completions стиль
+	completion = openai.chat.completions.create(
+		model=OPENAI_MODEL,
+		messages=[
+			{"role": "system", "content": "Ты — опытный юрист-процессуалист. Пиши строго структурированные процессуальные документы."},
+			{"role": "user", "content": prompt},
+		],
+		temperature=0.2,
+	)
+	return completion.choices[0].message.content
+
+
+def generate_legal_document(case_description: str,
+							similar_docs: List[Dict[str, Any]],
+							document_type: str = "исковое заявление") -> Dict[str, Any]:
+	"""Собирает промпт, вызывает Gemini, при ошибке — OpenAI.
+	Возвращает словарь с результатом и источником ("gemini" или "openai").
+	"""
+	prompt = compose_prompt(case_description, similar_docs, document_type)
+	try:
+		text = generate_with_gemini(prompt)
+		if not text or len(text.strip()) < 50:
+			raise RuntimeError("Пустой или слишком короткий ответ Gemini")
+		return {"provider": "gemini", "document": text}
+	except Exception as e:
+		logger.error(f"Gemini ошибка: {e}. Перехожу на OpenAI.")
+		try:
+			text = generate_with_openai(prompt)
+			return {"provider": "openai", "document": text}
+		except Exception as e2:
+			logger.error(f"OpenAI ошибка: {e2}")
+			raise

@@ -8,6 +8,7 @@ load_dotenv()
 
 # API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Database Settings
 CHROMA_DB_PATH = "./data/chroma_db"
@@ -15,7 +16,8 @@ VECTOR_COLLECTION_NAME = "legal_documents"
 
 # Model Settings
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-GEMINI_MODEL = "gemini-2.0-flash-exp"  # Using available model
+GEMINI_MODEL = "gemini-2.5-pro"
+OPENAI_MODEL = "gpt-5"  # fallback model
 
 # Search Settings
 TOP_K_RESULTS = 5

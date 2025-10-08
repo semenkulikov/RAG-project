@@ -27,3 +27,4 @@ loguru
 # Development
 pytest
 black
+openai

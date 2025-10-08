@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Юридический ассистент — RAG MVP</title>
+	<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+	<div class="container">
+		<h1>Юридический ассистент — RAG MVP</h1>
+		<p class="meta">Версия API: {{ api_version }} · Бэкенд: {{ backend }}</p>
+
+		<label for="document_type">Тип документа</label>
+		<select id="document_type">
+			<option value="исковое заявление">Исковое заявление</option>
+			<option value="апелляционная жалоба">Апелляционная жалоба</option>
+			<option value="кассационная жалоба">Кассационная жалоба</option>
+		</select>
+
+		<label for="query">Опишите обстоятельства дела</label>
+		<textarea id="query" rows="8" placeholder="Опишите стороны, факты, нормы, требования..." ></textarea>
+
+		<button id="generateBtn">Сгенерировать документ</button>
+
+		<div id="status"></div>
+		<div id="result" class="result"></div>
+		<div id="snippets" class="snippets"></div>
+	</div>
+
+	<script>
+	const btn = document.getElementById('generateBtn');
+	const queryEl = document.getElementById('query');
+	const typeEl = document.getElementById('document_type');
+	const statusEl = document.getElementById('status');
+	const resultEl = document.getElementById('result');
+	const snippetsEl = document.getElementById('snippets');
+
+	btn.onclick = async () => {
+		const query = queryEl.value.trim();
+		const document_type = typeEl.value;
+		if (!query) {
+			statusEl.textContent = 'Введите описание дела';
+			return;
+		}
+		statusEl.textContent = 'Генерация...';
+		resultEl.textContent = '';
+		snippetsEl.innerHTML = '';
+		try {
+			const resp = await fetch('/api/generate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ query, document_type })
+			});
+			if (!resp.ok) {
+				const err = await resp.json();
+				throw new Error(err.detail || 'Ошибка API');
+			}
+			const data = await resp.json();
+			statusEl.textContent = `Провайдер: ${data.provider}`;
+			resultEl.textContent = data.document || '';
+			if (data.snippets && data.snippets.length) {
+				snippetsEl.innerHTML = '<h3>Использованные фрагменты</h3>' + data.snippets.map(s => `
+					<div class="snippet">
+						<div class="src">${s.source_file} · ${s.chunk_type}</div>
+						<div class="txt">${(s.text||'').replace(/</g,'&lt;')}</div>
+					</div>
+				`).join('');
+			}
+		} catch (e) {
+			statusEl.textContent = 'Ошибка: ' + e.message;
+		}
+	};
+	</script>
+</body>
+</html>

@@ -28,3 +28,4 @@ loguru
 pytest
 black
 openai
+jinja2

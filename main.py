@@ -91,7 +91,19 @@ async def api_generate(payload: Dict[str, Any]):
 	if db is None:
 		raise HTTPException(status_code=500, detail="vector backend not initialized")
 	
-	similar = db.search_similar(query, n_results=5)
+	# Определяем тип спора для фильтрации
+	query_lower = query.lower()
+	dispute_type = None
+	if any(keyword in query_lower for keyword in ["потребитель", "товар", "продавец", "недостаток", "качество"]):
+		dispute_type = "consumer_protection"
+	elif any(keyword in query_lower for keyword in ["договор", "контракт", "обязательство"]):
+		dispute_type = "contract_dispute"
+	
+	# Используем фильтрацию по типу спора если доступна
+	if hasattr(db, 'search_similar') and 'dispute_type' in db.search_similar.__code__.co_varnames:
+		similar = db.search_similar(query, n_results=5, dispute_type=dispute_type)
+	else:
+		similar = db.search_similar(query, n_results=5)
 	
 	# Generate
 	result = generate_legal_document(query, similar, document_type=document_type)

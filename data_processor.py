@@ -65,7 +65,14 @@ class LegalDocumentProcessor:
 			"date": "",
 			"judges": [],
 			"parties": [],
-			"document_type": ""
+			"document_type": "",
+			"legal_area": "",
+			"key_articles": [],
+			"dispute_type": "",
+			"consumer_protection": False,
+			"contract_dispute": False,
+			"administrative": False,
+			"criminal": False
 		}
 		
 		# Извлечение номера дела
@@ -120,6 +127,81 @@ class LegalDocumentProcessor:
 			metadata["document_type"] = "Решение"
 		elif "постановление" in text.lower():
 			metadata["document_type"] = "Постановление"
+		elif "исковое заявление" in text.lower():
+			metadata["document_type"] = "исковое заявление"
+		elif "апелляционная жалоба" in text.lower():
+			metadata["document_type"] = "апелляционная жалоба"
+		elif "кассационная жалоба" in text.lower():
+			metadata["document_type"] = "кассационная жалоба"
+		
+		# Классификация по типу спора
+		text_lower = text.lower()
+		
+		# Потребительские споры
+		consumer_keywords = [
+			"защита прав потребителей", "зозпп", "потребитель", "продавец", 
+			"изготовитель", "исполнитель", "недостаток товара", "ненадлежащее качество",
+			"возврат товара", "замена товара", "устранение недостатков", "неустойка",
+			"компенсация морального вреда", "штраф", "ст. 18", "ст. 25", "ст. 15"
+		]
+		
+		if any(keyword in text_lower for keyword in consumer_keywords):
+			metadata["consumer_protection"] = True
+			metadata["dispute_type"] = "consumer_protection"
+			metadata["legal_area"] = "защита прав потребителей"
+		
+		# Договорные споры
+		contract_keywords = [
+			"договор", "контракт", "соглашение", "обязательство", "исполнение договора",
+			"нарушение договора", "расторжение договора", "взыскание долга", "неустойка"
+		]
+		
+		if any(keyword in text_lower for keyword in contract_keywords):
+			metadata["contract_dispute"] = True
+			if not metadata["dispute_type"]:
+				metadata["dispute_type"] = "contract_dispute"
+				metadata["legal_area"] = "договорное право"
+		
+		# Административные дела
+		admin_keywords = [
+			"административное дело", "административное правонарушение", "штраф гибдд",
+			"лишение прав", "административная ответственность", "коап"
+		]
+		
+		if any(keyword in text_lower for keyword in admin_keywords):
+			metadata["administrative"] = True
+			if not metadata["dispute_type"]:
+				metadata["dispute_type"] = "administrative"
+				metadata["legal_area"] = "административное право"
+		
+		# Уголовные дела
+		criminal_keywords = [
+			"уголовное дело", "преступление", "уголовная ответственность", "наказание",
+			"суд присяжных", "обвинение", "защита", "прокурор"
+		]
+		
+		if any(keyword in text_lower for keyword in criminal_keywords):
+			metadata["criminal"] = True
+			if not metadata["dispute_type"]:
+				metadata["dispute_type"] = "criminal"
+				metadata["legal_area"] = "уголовное право"
+		
+		# Извлечение ключевых статей
+		article_patterns = [
+			r"ст\.\s*(\d+)\s*(?:п\.\s*(\d+))?\s*(?:ч\.\s*(\d+))?\s*(?:ГК|ГПК|АПК|УК|КоАП|ЗоЗПП)",
+			r"статья\s*(\d+)\s*(?:пункт\s*(\d+))?\s*(?:часть\s*(\d+))?\s*(?:ГК|ГПК|АПК|УК|КоАП|ЗоЗПП)",
+			r"(\d+)\s*статья\s*(?:пункт\s*(\d+))?\s*(?:часть\s*(\d+))?\s*(?:ГК|ГПК|АПК|УК|КоАП|ЗоЗПП)"
+		]
+		
+		for pattern in article_patterns:
+			matches = re.findall(pattern, text, re.IGNORECASE)
+			for match in matches:
+				article_ref = f"ст. {match[0]}"
+				if match[1]:
+					article_ref += f" п. {match[1]}"
+				if match[2]:
+					article_ref += f" ч. {match[2]}"
+				metadata["key_articles"].append(article_ref)
 		
 		return metadata
 	

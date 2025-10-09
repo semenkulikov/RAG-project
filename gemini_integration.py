@@ -30,18 +30,56 @@ else:
 	logger.warning("OPENAI_API_KEY is empty. OpenAI fallback will fail.")
 
 def compose_prompt(case_description: str, similar_docs: List[Dict[str, Any]], document_type: str = "исковое заявление") -> str:
-	"""Формирует промпт для LLM на основе найденных документов.
+	"""Формирует промпт для LLM на основе найденных документов с улучшенной фильтрацией.
 	Ожидается, что similar_docs — это список словарей, как из VectorDatabase.search_similar.
 	"""
+	# Фильтруем документы по релевантности
+	relevant_docs = []
+	for doc in similar_docs[:10]:  # Берем топ-10
+		meta = doc.get("metadata", {})
+		dispute_type = meta.get("dispute_type", "")
+		legal_area = meta.get("legal_area", "")
+		
+		# Приоритет потребительским спорам для данного случая
+		if "потребитель" in case_description.lower() or "товар" in case_description.lower():
+			if dispute_type == "consumer_protection" or "защита прав потребителей" in legal_area:
+				relevant_docs.append(doc)
+		else:
+			# Для других типов споров используем все документы
+			relevant_docs.append(doc)
+	
+	# Если не нашли специфичных документов, берем все
+	if not relevant_docs:
+		relevant_docs = similar_docs[:5]
+	
 	context_lines: List[str] = []
-	for i, doc in enumerate(similar_docs[:10], 1):
+	for i, doc in enumerate(relevant_docs, 1):
 		meta = doc.get("metadata", {})
 		source = meta.get("source_file", "unknown")
 		chunk_type = meta.get("chunk_type", "legal_text")
+		legal_area = meta.get("legal_area", "")
+		dispute_type = meta.get("dispute_type", "")
+		
+		# Добавляем информацию о типе спора в контекст
+		type_info = f" ({legal_area}, {dispute_type})" if legal_area else ""
+		
 		context_lines.append(
-			f"Дело {i} (источник: {source}, тип: {chunk_type}):\n{doc.get('text','')[:1500]}"
+			f"Дело {i} (источник: {source}, тип: {chunk_type}{type_info}):\n{doc.get('text','')[:1500]}"
 		)
-	context = "\n\n".join(context_lines) if context_lines else "Нет контекста"
+	
+	context = "\n\n".join(context_lines) if context_lines else "Нет релевантного контекста"
+	
+	# Определяем тип спора из описания дела
+	case_lower = case_description.lower()
+	if any(keyword in case_lower for keyword in ["потребитель", "товар", "продавец", "недостаток", "качество"]):
+		dispute_category = "потребительский спор"
+		legal_framework = "Закон РФ 'О защите прав потребителей'"
+	elif any(keyword in case_lower for keyword in ["договор", "контракт", "обязательство"]):
+		dispute_category = "договорный спор"
+		legal_framework = "Гражданский кодекс РФ"
+	else:
+		dispute_category = "гражданский спор"
+		legal_framework = "соответствующее законодательство РФ"
 	
 	prompt = f"""
 Ты — опытный юрист-процессуалист. Составь {document_type} с подробной мотивировочной частью.
@@ -49,14 +87,18 @@ def compose_prompt(case_description: str, similar_docs: List[Dict[str, Any]], do
 ОБСТОЯТЕЛЬСТВА ДЕЛА:
 {case_description}
 
+ТИП СПОРА: {dispute_category}
+ПРАВОВАЯ ОСНОВА: {legal_framework}
+
 РЕЛЕВАНТНАЯ СУДЕБНАЯ ПРАКТИКА (из найденных документов):
 {context}
 
 ТРЕБОВАНИЯ К ОТВЕТУ:
 1) Структура: вводная часть, обстоятельства, правовая квалификация, ссылки на нормы и позиции ВС РФ, просительная часть, приложения.
-2) В мотивировочной части опирайся на приведенные выдержки; цитируй нормы и правовые позиции явно.
-3) Стиль официальный, без воды. Русский язык. Укажи ссылки на источники (файл/позиция), если это уместно.
-4) Верни только финальный текст документа без пояснений.
+2) В мотивировочной части опирайся ТОЛЬКО на приведенные релевантные выдержки; цитируй нормы и правовые позиции явно.
+3) Если найденные документы не относятся к данному типу спора, укажи это и используй общие принципы права.
+4) Стиль официальный, без воды. Русский язык. Укажи ссылки на источники (файл/позиция), если это уместно.
+5) Верни только финальный текст документа без пояснений.
 """
 	return prompt.strip()
 

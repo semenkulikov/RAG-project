@@ -129,7 +129,13 @@ class VectorDatabase:
 						'court': doc.get('metadata', {}).get('court', ''),
 						'document_type': doc.get('metadata', {}).get('document_type', ''),
 						'chunk_id': chunk['id'],
-						'chunk_type': chunk.get('type', 'legal_text')
+						'chunk_type': chunk.get('type', 'legal_text'),
+						'legal_area': doc.get('metadata', {}).get('legal_area', ''),
+						'dispute_type': doc.get('metadata', {}).get('dispute_type', ''),
+						'consumer_protection': doc.get('metadata', {}).get('consumer_protection', False),
+						'contract_dispute': doc.get('metadata', {}).get('contract_dispute', False),
+						'administrative': doc.get('metadata', {}).get('administrative', False),
+						'criminal': doc.get('metadata', {}).get('criminal', False)
 					})
 					ids.append(f"{doc.get('source_file', 'unknown')}_{chunk['id']}")
 			if 'legal_positions' in doc:
@@ -142,7 +148,13 @@ class VectorDatabase:
 						'document_type': doc.get('metadata', {}).get('document_type', ''),
 						'chunk_id': f"position_{j}",
 						'chunk_type': 'legal_position',
-						'articles': ', '.join(position.get('articles', []))
+						'articles': ', '.join(position.get('articles', [])),
+						'legal_area': doc.get('metadata', {}).get('legal_area', ''),
+						'dispute_type': doc.get('metadata', {}).get('dispute_type', ''),
+						'consumer_protection': doc.get('metadata', {}).get('consumer_protection', False),
+						'contract_dispute': doc.get('metadata', {}).get('contract_dispute', False),
+						'administrative': doc.get('metadata', {}).get('administrative', False),
+						'criminal': doc.get('metadata', {}).get('criminal', False)
 					})
 					ids.append(f"{doc.get('source_file', 'unknown')}_position_{j}")
 		if not texts:
@@ -161,10 +173,51 @@ class VectorDatabase:
 				logger.info(f"В коллекцию добавлено {added}/{len(texts)} фрагментов")
 		logger.info(f"Добавлено {len(texts)} документов в векторную базу")
 	
-	def search_similar(self, query: str, n_results: int = TOP_K_RESULTS, filter_metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+	def search_similar(self, query: str, n_results: int = TOP_K_RESULTS, 
+					   filter_metadata: Optional[Dict] = None,
+					   dispute_type: Optional[str] = None) -> List[Dict[str, Any]]:
+		"""
+		Ищет похожие документы по запросу с возможностью фильтрации по типу спора
+		
+		Args:
+			query: Поисковый запрос
+			n_results: Количество результатов
+			filter_metadata: Дополнительные фильтры метаданных
+			dispute_type: Тип спора для фильтрации (consumer_protection, contract_dispute, etc.)
+			
+		Returns:
+			Список похожих документов с метаданными
+		"""
 		try:
+			# Формируем фильтр метаданных
+			where_filter = filter_metadata or {}
+			
+			# Добавляем фильтр по типу спора если указан
+			if dispute_type:
+				if dispute_type == "consumer_protection":
+					where_filter["consumer_protection"] = True
+				elif dispute_type == "contract_dispute":
+					where_filter["contract_dispute"] = True
+				elif dispute_type == "administrative":
+					where_filter["administrative"] = True
+				elif dispute_type == "criminal":
+					where_filter["criminal"] = True
+			
 			query_embedding = self._encode_batch([query])[0]
-			results = self.collection.query(query_embeddings=[query_embedding], n_results=n_results, where=filter_metadata)
+			
+			# Если есть фильтры, используем их
+			if where_filter:
+				results = self.collection.query(
+					query_embeddings=[query_embedding], 
+					n_results=n_results, 
+					where=where_filter
+				)
+			else:
+				results = self.collection.query(
+					query_embeddings=[query_embedding], 
+					n_results=n_results
+				)
+			
 			similar_docs: List[Dict[str, Any]] = []
 			for i in range(len(results['documents'][0])):
 				similar_docs.append({
@@ -173,8 +226,10 @@ class VectorDatabase:
 					'distance': results['distances'][0][i],
 					'id': results['ids'][0][i]
 				})
-			logger.info(f"Найдено {len(similar_docs)} похожих документов")
+			
+			logger.info(f"Найдено {len(similar_docs)} похожих документов (фильтр: {dispute_type or 'нет'})")
 			return similar_docs
+			
 		except Exception as e:
 			logger.error(f"Ошибка при поиске: {e}")
 			raise

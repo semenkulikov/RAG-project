@@ -42,9 +42,6 @@ class FullPipelineTest:
             print("❌ PDF файлы не найдены!")
             return False
         
-        for pdf_file in pdf_files:
-            print(f"   - {pdf_file}")
-        
         # Создаем процессор
         print("\n📊 Инициализация процессора данных...")
         self.processor = LegalDocumentProcessor()
@@ -53,33 +50,17 @@ class FullPipelineTest:
         print("🔄 Обработка PDF файлов...")
         start_time = time.time()
         
-        self.processor.process_all_pdfs(PDF_DIR, JSON_DIR)
+        # Получаем сводку, без построчной печати по каждому документу
+        summary = self.processor.process_all_pdfs(PDF_DIR, JSON_DIR)
         
         processing_time = time.time() - start_time
         
-        # Проверяем результаты
-        json_files = [f for f in os.listdir(JSON_DIR) if f.endswith('.json')]
+        # Краткая сводка
         print(f"\n✅ Обработка завершена за {processing_time:.2f} секунд")
-        print(f"📄 Создано JSON файлов: {len(json_files)}")
+        print(f"📄 Создано/обновлено JSON: {summary.get('processed', 0)}, пропущено: {summary.get('skipped', 0)}, ошибок: {summary.get('errors', 0)}, всего PDF: {summary.get('total', len(pdf_files))}")
         
-        # Показываем статистику по каждому файлу
-        print("\n📊 Статистика обработки:")
-        for json_file in json_files:
-            json_path = os.path.join(JSON_DIR, json_file)
-            try:
-                import json
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    info = data.get('processing_info', {})
-                    print(f"   {json_file}:")
-                    print(f"     - Чанков: {info.get('total_chunks', 0)}")
-                    print(f"     - Правовых позиций: {info.get('total_positions', 0)}")
-                    print(f"     - Длина текста: {info.get('text_length', 0)} символов")
-            except Exception as e:
-                print(f"   {json_file}: Ошибка чтения - {e}")
-        
-        return len(json_files) > 0
-    
+        return (summary.get('processed', 0) + summary.get('skipped', 0)) > 0
+
     def step2_create_vector_database(self):
         """Шаг 2: Создание векторной базы данных"""
         print("\n" + "="*60)
@@ -93,22 +74,20 @@ class FullPipelineTest:
             # Создаем полную векторную базу данных
             self.vector_db = VectorDatabase()
             
-            # Загружаем документы из JSON файлов
+            # Загружаем документы из JSON файлов (функция вернет сводку)
             print("📁 Загрузка документов из JSON файлов...")
-            self.vector_db.load_from_json_files(JSON_DIR)
+            load_summary = self.vector_db.load_from_json_files(JSON_DIR)
             
-            # Получаем информацию о коллекции
+            # Информация о коллекции
             info = self.vector_db.get_collection_info()
             
             creation_time = time.time() - start_time
             
             print(f"\n✅ Векторная база данных создана за {creation_time:.2f} секунд")
-            print(f"📊 Информация о коллекции:")
-            print(f"   - Название: {info['name']}")
-            print(f"   - Количество документов: {info['document_count']}")
-            print(f"   - Путь к БД: {info['db_path']}")
+            print(f"📊 Информация о коллекции: документов {info.get('document_count', 0)}")
+            print(f"📄 Новых файлов: {load_summary.get('loaded_files', 0)}, пропущено: {load_summary.get('skipped', 0)}, ошибок: {load_summary.get('errors', 0)}, всего JSON: {load_summary.get('total', 0)}")
             
-            return info['document_count'] > 0
+            return info.get('document_count', 0) > 0
             
         except Exception as e:
             print(f"❌ Ошибка при создании векторной базы данных: {e}")
@@ -128,20 +107,18 @@ class FullPipelineTest:
             except Exception as e2:
                 print(f"❌ Ошибка и в упрощенной версии: {e2}")
                 return False
-    
+
     def step3_test_search(self):
         """Шаг 3: Тестирование поиска"""
         print("\n" + "="*60)
         print("🔄 ШАГ 3: ТЕСТИРОВАНИЕ СЕМАНТИЧЕСКОГО ПОИСКА")
         print("="*60)
         
-        # Определяем какую базу использовать
         db = self.vector_db if self.vector_db else self.simple_db
         if not db:
             print("❌ Векторная база данных не инициализирована!")
             return False
         
-        # Тестовые запросы
         test_queries = [
             "договор займа и расписка",
             "исковое заявление в суд",
@@ -167,19 +144,12 @@ class FullPipelineTest:
                 if results:
                     for j, result in enumerate(results, 1):
                         text_preview = result['text'][:80].replace('\n', ' ')
-                        
                         if hasattr(result, 'get') and 'similarity' in result:
                             score = result['similarity']
                             print(f"      {j}. {text_preview}... (сходство: {score:.4f})")
                         else:
                             distance = result.get('distance', 0)
                             print(f"      {j}. {text_preview}... (расстояние: {distance:.4f})")
-                        
-                        metadata = result.get('metadata', {})
-                        if metadata.get('source_file'):
-                            print(f"         Источник: {metadata['source_file']}")
-                        if metadata.get('chunk_type'):
-                            print(f"         Тип: {metadata['chunk_type']}")
                 else:
                     print("   ❌ Результаты не найдены")
                 
@@ -190,7 +160,7 @@ class FullPipelineTest:
                 logger.error(f"Ошибка поиска для запроса '{query}': {e}")
         
         return True
-    
+
     def step4_performance_analysis(self):
         """Шаг 4: Анализ производительности"""
         print("\n" + "="*60)
@@ -202,7 +172,6 @@ class FullPipelineTest:
             print("❌ Векторная база данных не инициализирована!")
             return False
         
-        # Тест производительности
         test_query = "договор займа"
         times = []
         
@@ -210,7 +179,7 @@ class FullPipelineTest:
         
         for i in range(10):
             start_time = time.time()
-            results = db.search_similar(test_query, n_results=5)
+            _ = db.search_similar(test_query, n_results=5)
             search_time = time.time() - start_time
             times.append(search_time)
         
@@ -232,7 +201,6 @@ class FullPipelineTest:
         print("📋 ШАГ 5: ИТОГОВЫЙ ОТЧЕТ")
         print("="*60)
         
-        # Собираем статистику
         pdf_files = [f for f in os.listdir(PDF_DIR) if f.lower().endswith('.pdf')]
         json_files = [f for f in os.listdir(JSON_DIR) if f.endswith('.json')]
         
@@ -242,25 +210,13 @@ class FullPipelineTest:
         print("📊 СВОДНАЯ СТАТИСТИКА:")
         print(f"   📁 PDF файлов обработано: {len(pdf_files)}")
         print(f"   📄 JSON файлов создано: {len(json_files)}")
-        
-        if self.vector_db:
-            print(f"   🗄️ Векторная БД: ChromaDB + SentenceTransformers")
-            print(f"   📊 Документов в БД: {db_info.get('document_count', 0)}")
-        else:
-            print(f"   🗄️ Векторная БД: Упрощенная (TF-IDF)")
-            print(f"   📊 Документов в БД: {db_info.get('document_count', 0)}")
+        print(f"   🗄️ Бэкенд: {'ChromaDB' if self.vector_db else 'TF-IDF'}")
+        print(f"   📊 Документов в БД: {db_info.get('document_count', 0)}")
         
         print(f"\n✅ СТАТУС КОМПОНЕНТОВ:")
         print(f"   ✅ Обработка PDF: Работает")
-        print(f"   ✅ Извлечение метаданных: Работает")
-        print(f"   ✅ Создание чанков: Работает")
         print(f"   ✅ Векторизация: Работает")
         print(f"   ✅ Семантический поиск: Работает")
-        
-        print(f"\n🎯 ГОТОВНОСТЬ К СЛЕДУЮЩЕМУ ЭТАПУ:")
-        print(f"   ✅ Данные обработаны и проиндексированы")
-        print(f"   ✅ Поиск работает корректно")
-        print(f"   🔄 Готов к интеграции с Gemini 2.5 Pro")
         
         return True
     
@@ -271,7 +227,6 @@ class FullPipelineTest:
         
         start_time = time.time()
         
-        # Выполняем все шаги
         steps = [
             ("Обработка PDF файлов", self.step1_process_pdfs),
             ("Создание векторной БД", self.step2_create_vector_database),
@@ -297,7 +252,6 @@ class FullPipelineTest:
         
         total_time = time.time() - start_time
         
-        # Итоговый результат
         print("\n" + "="*60)
         print("🏁 ИТОГИ ТЕСТИРОВАНИЯ")
         print("="*60)

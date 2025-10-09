@@ -5,292 +5,226 @@
 
 import os
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterable
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from loguru import logger
 from config import CHROMA_DB_PATH, VECTOR_COLLECTION_NAME, EMBEDDING_MODEL, TOP_K_RESULTS
 
+INGEST_MANIFEST = os.path.join(CHROMA_DB_PATH, "ingested_files.txt")
+DEFAULT_TEXTS_BATCH = 1000  # количество чанков на партию эмбеддингов
+DEFAULT_FILES_BATCH = 25    # количество JSON файлов на партию
+
 class VectorDatabase:
-    """Класс для работы с векторной базой данных"""
-    
-    def __init__(self, db_path: str = CHROMA_DB_PATH):
-        """
-        Инициализация векторной базы данных
-        
-        Args:
-            db_path: Путь к базе данных ChromaDB
-        """
-        self.db_path = db_path
-        self.embedding_model = None
-        self.client = None
-        self.collection = None
-        
-        self.setup_logging()
-        self.initialize_database()
-        self.load_embedding_model()
-    
-    def setup_logging(self):
-        """Настройка логирования"""
-        logger.add("./logs/vector_database.log", rotation="1 MB", level="INFO")
-    
-    def initialize_database(self):
-        """Инициализация ChromaDB"""
-        try:
-            # Создаем директорию если её нет
-            os.makedirs(self.db_path, exist_ok=True)
-            
-            # Инициализируем клиент ChromaDB
-            self.client = chromadb.PersistentClient(
-                path=self.db_path,
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
-            )
-            
-            # Получаем или создаем коллекцию
-            try:
-                self.collection = self.client.get_collection(name=VECTOR_COLLECTION_NAME)
-                logger.info(f"Загружена существующая коллекция: {VECTOR_COLLECTION_NAME}")
-            except Exception:
-                self.collection = self.client.create_collection(
-                    name=VECTOR_COLLECTION_NAME,
-                    metadata={"description": "Коллекция юридических документов для RAG системы"}
-                )
-                logger.info(f"Создана новая коллекция: {VECTOR_COLLECTION_NAME}")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при инициализации базы данных: {e}")
-            raise
-    
-    def load_embedding_model(self):
-        """Загрузка модели для создания эмбеддингов"""
-        try:
-            logger.info(f"Загружаю модель эмбеддингов: {EMBEDDING_MODEL}")
-            self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-            logger.info("Модель эмбеддингов загружена успешно")
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке модели эмбеддингов: {e}")
-            raise
-    
-    def create_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """
-        Создает эмбеддинги для списка текстов
-        
-        Args:
-            texts: Список текстов для векторизации
-            
-        Returns:
-            Список векторов
-        """
-        try:
-            embeddings = self.embedding_model.encode(texts, convert_to_tensor=False)
-            logger.info(f"Создано {len(embeddings)} эмбеддингов")
-            return embeddings.tolist()
-        except Exception as e:
-            logger.error(f"Ошибка при создании эмбеддингов: {e}")
-            raise
-    
-    def add_documents(self, documents: List[Dict[str, Any]]):
-        """
-        Добавляет документы в векторную базу данных
-        
-        Args:
-            documents: Список документов с метаданными
-        """
-        try:
-            if not documents:
-                logger.warning("Нет документов для добавления")
-                return
-            
-            # Подготавливаем данные
-            texts = []
-            metadatas = []
-            ids = []
-            
-            for i, doc in enumerate(documents):
-                # Извлекаем текст из чанков
-                if 'chunks' in doc:
-                    for j, chunk in enumerate(doc['chunks']):
-                        texts.append(chunk['text'])
-                        metadatas.append({
-                            'source_file': doc.get('source_file', 'unknown'),
-                            'case_number': doc.get('metadata', {}).get('case_number', ''),
-                            'court': doc.get('metadata', {}).get('court', ''),
-                            'document_type': doc.get('metadata', {}).get('document_type', ''),
-                            'chunk_id': chunk['id'],
-                            'chunk_type': chunk.get('type', 'legal_text')
-                        })
-                        ids.append(f"{doc.get('source_file', 'unknown')}_{chunk['id']}")
-                
-                # Добавляем правовые позиции отдельно
-                if 'legal_positions' in doc:
-                    for j, position in enumerate(doc['legal_positions']):
-                        texts.append(position['text'])
-                        metadatas.append({
-                            'source_file': doc.get('source_file', 'unknown'),
-                            'case_number': doc.get('metadata', {}).get('case_number', ''),
-                            'court': doc.get('metadata', {}).get('court', ''),
-                            'document_type': doc.get('metadata', {}).get('document_type', ''),
-                            'chunk_id': f"position_{j}",
-                            'chunk_type': 'legal_position',
-                            'articles': ', '.join(position.get('articles', []))
-                        })
-                        ids.append(f"{doc.get('source_file', 'unknown')}_position_{j}")
-            
-            if not texts:
-                logger.warning("Нет текстов для векторизации")
-                return
-            
-            # Создаем эмбеддинги
-            embeddings = self.create_embeddings(texts)
-            
-            # Добавляем в коллекцию
-            self.collection.add(
-                embeddings=embeddings,
-                documents=texts,
-                metadatas=metadatas,
-                ids=ids
-            )
-            
-            logger.info(f"Добавлено {len(texts)} документов в векторную базу")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при добавлении документов: {e}")
-            raise
-    
-    def search_similar(self, query: str, n_results: int = TOP_K_RESULTS, 
-                      filter_metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
-        """
-        Ищет похожие документы по запросу
-        
-        Args:
-            query: Поисковый запрос
-            n_results: Количество результатов
-            filter_metadata: Фильтр по метаданным
-            
-        Returns:
-            Список похожих документов с метаданными
-        """
-        try:
-            # Создаем эмбеддинг для запроса
-            query_embedding = self.create_embeddings([query])[0]
-            
-            # Выполняем поиск
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=filter_metadata
-            )
-            
-            # Формируем результат
-            similar_docs = []
-            for i in range(len(results['documents'][0])):
-                similar_docs.append({
-                    'text': results['documents'][0][i],
-                    'metadata': results['metadatas'][0][i],
-                    'distance': results['distances'][0][i],
-                    'id': results['ids'][0][i]
-                })
-            
-            logger.info(f"Найдено {len(similar_docs)} похожих документов")
-            return similar_docs
-            
-        except Exception as e:
-            logger.error(f"Ошибка при поиске: {e}")
-            raise
-    
-    def get_collection_info(self) -> Dict[str, Any]:
-        """
-        Получает информацию о коллекции
-        
-        Returns:
-            Информация о коллекции
-        """
-        try:
-            count = self.collection.count()
-            return {
-                'name': VECTOR_COLLECTION_NAME,
-                'document_count': count,
-                'db_path': self.db_path
-            }
-        except Exception as e:
-            logger.error(f"Ошибка при получении информации о коллекции: {e}")
-            return {}
-    
-    def clear_collection(self):
-        """Очищает коллекцию"""
-        try:
-            self.client.delete_collection(name=VECTOR_COLLECTION_NAME)
-            self.collection = self.client.create_collection(
-                name=VECTOR_COLLECTION_NAME,
-                metadata={"description": "Коллекция юридических документов для RAG системы"}
-            )
-            logger.info("Коллекция очищена")
-        except Exception as e:
-            logger.error(f"Ошибка при очистке коллекции: {e}")
-            raise
-    
-    def load_from_json_files(self, json_dir: str):
-        """
-        Загружает документы из JSON файлов
-        
-        Args:
-            json_dir: Директория с JSON файлами
-        """
-        try:
-            if not os.path.exists(json_dir):
-                logger.warning(f"Директория {json_dir} не существует")
-                return
-            
-            json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
-            
-            if not json_files:
-                logger.warning(f"JSON файлы не найдены в {json_dir}")
-                return
-            
-            documents = []
-            for json_file in json_files:
-                json_path = os.path.join(json_dir, json_file)
-                try:
-                    with open(json_path, 'r', encoding='utf-8') as f:
-                        doc_data = json.load(f)
-                        documents.append(doc_data)
-                except Exception as e:
-                    logger.error(f"Ошибка при загрузке {json_file}: {e}")
-            
-            if documents:
-                self.add_documents(documents)
-                logger.info(f"Загружено {len(documents)} документов из JSON файлов")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке из JSON файлов: {e}")
-            raise
+	"""Класс для работы с векторной базой данных"""
+	
+	def __init__(self, db_path: str = CHROMA_DB_PATH):
+		self.db_path = db_path
+		self.embedding_model = None
+		self.client = None
+		self.collection = None
+		self._ingested: set[str] = set()
+		self.setup_logging()
+		self.initialize_database()
+		self._load_ingest_manifest()
+		self.load_embedding_model()
+	
+	def setup_logging(self):
+		logger.add("./logs/vector_database.log", rotation="1 MB", level="INFO")
+	
+	def initialize_database(self):
+		try:
+			os.makedirs(self.db_path, exist_ok=True)
+			self.client = chromadb.PersistentClient(
+				path=self.db_path,
+				settings=Settings(
+					anonymized_telemetry=False,
+					allow_reset=True
+				)
+			)
+			try:
+				self.collection = self.client.get_collection(name=VECTOR_COLLECTION_NAME)
+				logger.info(f"Загружена существующая коллекция: {VECTOR_COLLECTION_NAME}")
+			except Exception:
+				self.collection = self.client.create_collection(
+					name=VECTOR_COLLECTION_NAME,
+					metadata={"description": "Коллекция юридических документов для RAG системы"}
+				)
+				logger.info(f"Создана новая коллекция: {VECTOR_COLLECTION_NAME}")
+		except Exception as e:
+			logger.error(f"Ошибка при инициализации базы данных: {e}")
+			raise
+	
+	def _load_ingest_manifest(self):
+		try:
+			if os.path.exists(INGEST_MANIFEST):
+				with open(INGEST_MANIFEST, 'r', encoding='utf-8') as f:
+					self._ingested = set(line.strip() for line in f if line.strip())
+				logger.info(f"Манифест: уже загружено файлов: {len(self._ingested)}")
+		except Exception as e:
+			logger.warning(f"Не удалось загрузить манифест: {e}")
+			self._ingested = set()
+	
+	def _append_ingested(self, filename: str):
+		try:
+			with open(INGEST_MANIFEST, 'a', encoding='utf-8') as f:
+				f.write(filename + "\n")
+			self._ingested.add(filename)
+		except Exception as e:
+			logger.warning(f"Не удалось обновить манифест {filename}: {e}")
+	
+	def load_embedding_model(self):
+		try:
+			logger.info(f"Загружаю модель эмбеддингов: {EMBEDDING_MODEL}")
+			self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+			logger.info("Модель эмбеддингов загружена успешно")
+		except Exception as e:
+			logger.error(f"Ошибка при загрузке модели эмбеддингов: {e}")
+			raise
+	
+	def _encode_batch(self, texts: List[str]) -> List[List[float]]:
+		embeddings = self.embedding_model.encode(texts, batch_size=64, convert_to_tensor=False, show_progress_bar=False)
+		return embeddings.tolist()
+	
+	def add_documents(self, documents: List[Dict[str, Any]]):
+		"""Добавляет документы в коллекцию одним вызовом (для малых партий)."""
+		if not documents:
+			logger.warning("Нет документов для добавления")
+			return
+		texts: List[str] = []
+		metadatas: List[Dict[str, Any]] = []
+		ids: List[str] = []
+		for doc in documents:
+			if 'chunks' in doc:
+				for chunk in doc['chunks']:
+					texts.append(chunk['text'])
+					metadatas.append({
+						'source_file': doc.get('source_file', 'unknown'),
+						'case_number': doc.get('metadata', {}).get('case_number', ''),
+						'court': doc.get('metadata', {}).get('court', ''),
+						'document_type': doc.get('metadata', {}).get('document_type', ''),
+						'chunk_id': chunk['id'],
+						'chunk_type': chunk.get('type', 'legal_text')
+					})
+					ids.append(f"{doc.get('source_file', 'unknown')}_{chunk['id']}")
+			if 'legal_positions' in doc:
+				for j, position in enumerate(doc['legal_positions']):
+					texts.append(position['text'])
+					metadatas.append({
+						'source_file': doc.get('source_file', 'unknown'),
+						'case_number': doc.get('metadata', {}).get('case_number', ''),
+						'court': doc.get('metadata', {}).get('court', ''),
+						'document_type': doc.get('metadata', {}).get('document_type', ''),
+						'chunk_id': f"position_{j}",
+						'chunk_type': 'legal_position',
+						'articles': ', '.join(position.get('articles', []))
+					})
+					ids.append(f"{doc.get('source_file', 'unknown')}_position_{j}")
+		if not texts:
+			logger.warning("Нет текстов для векторизации")
+			return
+		# батч-эмбеддинг по текстам, чтобы не держать всё в памяти
+		added = 0
+		for start in range(0, len(texts), DEFAULT_TEXTS_BATCH):
+			end = min(start + DEFAULT_TEXTS_BATCH, len(texts))
+			batch_texts = texts[start:end]
+			batch_metadatas = metadatas[start:end]
+			batch_ids = ids[start:end]
+			embeddings = self._encode_batch(batch_texts)
+			self.collection.add(embeddings=embeddings, documents=batch_texts, metadatas=batch_metadatas, ids=batch_ids)
+			added += len(batch_texts)
+			if added % 1000 == 0:
+				logger.info(f"В коллекцию добавлено {added}/{len(texts)} фрагментов")
+		logger.info(f"Добавлено {len(texts)} документов в векторную базу")
+	
+	def search_similar(self, query: str, n_results: int = TOP_K_RESULTS, filter_metadata: Optional[Dict] = None) -> List[Dict[str, Any]]:
+		try:
+			query_embedding = self._encode_batch([query])[0]
+			results = self.collection.query(query_embeddings=[query_embedding], n_results=n_results, where=filter_metadata)
+			similar_docs: List[Dict[str, Any]] = []
+			for i in range(len(results['documents'][0])):
+				similar_docs.append({
+					'text': results['documents'][0][i],
+					'metadata': results['metadatas'][0][i],
+					'distance': results['distances'][0][i],
+					'id': results['ids'][0][i]
+				})
+			logger.info(f"Найдено {len(similar_docs)} похожих документов")
+			return similar_docs
+		except Exception as e:
+			logger.error(f"Ошибка при поиске: {e}")
+			raise
+	
+	def get_collection_info(self) -> Dict[str, Any]:
+		try:
+			count = self.collection.count()
+			return {'name': VECTOR_COLLECTION_NAME, 'document_count': count, 'db_path': self.db_path}
+		except Exception as e:
+			logger.error(f"Ошибка при получении информации о коллекции: {e}")
+			return {}
+	
+	def clear_collection(self):
+		try:
+			self.client.delete_collection(name=VECTOR_COLLECTION_NAME)
+			self.collection = self.client.create_collection(name=VECTOR_COLLECTION_NAME, metadata={"description": "Коллекция юридических документов для RAG системы"})
+			logger.info("Коллекция очищена")
+		except Exception as e:
+			logger.error(f"Ошибка при очистке коллекции: {e}")
+			raise
+	
+	def load_from_json_files(self, json_dir: str, files_batch: int = DEFAULT_FILES_BATCH):
+		"""
+		Загружает документы из JSON в батчах с резюмом.
+		- Пропускает JSON файлы, которые уже были загружены ранее (манифест)
+		- Обрабатывает партиями, чтобы не держать всё в памяти
+		"""
+		if not os.path.exists(json_dir):
+			logger.warning(f"Директория {json_dir} не существует")
+			return
+		json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
+		if not json_files:
+			logger.warning(f"JSON файлы не найдены в {json_dir}")
+			return
+		logger.info(f"К загрузке JSON файлов: всего {len(json_files)}")
+		batch_docs: List[Dict[str, Any]] = []
+		loaded_files = 0
+		for idx, json_file in enumerate(json_files, 1):
+			if json_file in self._ingested:
+				if idx % 200 == 0:
+					logger.info(f"Пропущено ранее загруженных: {idx - loaded_files}")
+				continue
+			json_path = os.path.join(json_dir, json_file)
+			try:
+				with open(json_path, 'r', encoding='utf-8') as f:
+					doc_data = json.load(f)
+				batch_docs.append(doc_data)
+				loaded_files += 1
+				# если набрали партию по файлам или слишком много текстов
+				if loaded_files % files_batch == 0:
+					logger.info(f"Добавление партии: файлов {files_batch}, индекс {idx}/{len(json_files)}")
+					self.add_documents(batch_docs)
+					for d in batch_docs:
+						self._append_ingested(d.get('source_file', json_file))
+					batch_docs = []
+			except Exception as e:
+				logger.error(f"Ошибка при загрузке {json_file}: {e}")
+		# добиваем остаток
+		if batch_docs:
+			logger.info(f"Добавление финальной партии: файлов {len(batch_docs)}")
+			self.add_documents(batch_docs)
+			for d in batch_docs:
+				self._append_ingested(d.get('source_file', 'unknown'))
+		logger.info(f"Загружено новых JSON файлов: {loaded_files}. Всего отмечено как загруженные: {len(self._ingested)}")
+
 
 def main():
-    """Основная функция для тестирования"""
-    logger.info("Инициализация векторной базы данных...")
-    
-    # Создаем векторную базу
-    vector_db = VectorDatabase()
-    
-    # Загружаем документы из JSON файлов
-    from config import JSON_DIR
-    vector_db.load_from_json_files(JSON_DIR)
-    
-    # Получаем информацию о коллекции
-    info = vector_db.get_collection_info()
-    logger.info(f"Информация о коллекции: {info}")
-    
-    # Тестируем поиск
-    test_query = "договор займа расписка"
-    results = vector_db.search_similar(test_query, n_results=3)
-    
-    logger.info(f"Результаты поиска по запросу '{test_query}':")
-    for i, result in enumerate(results):
-        logger.info(f"  {i+1}. {result['text'][:100]}... (расстояние: {result['distance']:.4f})")
+	logger.info("Инициализация векторной базы данных...")
+	vector_db = VectorDatabase()
+	from config import JSON_DIR
+	vector_db.load_from_json_files(JSON_DIR)
+	info = vector_db.get_collection_info()
+	logger.info(f"Информация о коллекции: {info}")
 
 if __name__ == "__main__":
-    main()
+	main()

@@ -226,18 +226,21 @@ class LegalDocumentProcessor:
 		Обрабатывает все PDF файлы в директории
 		- Если JSON уже существует (и новее PDF), пропускаем
 		- Если force=True, пересобираем
+		Возвращает сводку: { 'processed': int, 'skipped': int, 'errors': int, 'total': int, 'processed_files': [json_name,...] }
 		"""
 		if not os.path.exists(input_dir):
 			logger.warning(f"Директория {input_dir} не существует")
-			return
+			return { 'processed': 0, 'skipped': 0, 'errors': 0, 'total': 0, 'processed_files': [] }
 		os.makedirs(output_dir, exist_ok=True)
 		pdf_files = [f for f in os.listdir(input_dir) if f.lower().endswith('.pdf')]
 		if not pdf_files:
 			logger.warning(f"PDF файлы не найдены в {input_dir}")
-			return
+			return { 'processed': 0, 'skipped': 0, 'errors': 0, 'total': 0, 'processed_files': [] }
 		logger.info(f"Найдено {len(pdf_files)} PDF файлов для обработки")
 		processed = 0
 		skipped = 0
+		errors = 0
+		processed_files: List[str] = []
 		for idx, pdf_file in enumerate(pdf_files, 1):
 			pdf_path = os.path.join(input_dir, pdf_file)
 			json_file = pdf_file.replace('.pdf', '.json')
@@ -246,7 +249,7 @@ class LegalDocumentProcessor:
 				try:
 					if os.path.getmtime(json_path) >= os.path.getmtime(pdf_path):
 						skipped += 1
-						if skipped % 100 == 0:
+						if skipped % 1000 == 0:
 							logger.info(f"Пропущено уже-конвертированных файлов: {skipped}")
 						continue
 				except Exception:
@@ -256,18 +259,22 @@ class LegalDocumentProcessor:
 				if data:
 					self.save_json(data, json_path)
 					processed += 1
+					processed_files.append(os.path.basename(json_path))
 			except Exception as e:
+				errors += 1
 				logger.error(f"Ошибка при обработке {pdf_file}: {e}")
-			if (processed + skipped) % 50 == 0:
+			if (processed + skipped) % 500 == 0:
 				logger.info(f"Прогресс: обработано/пропущено {processed}/{skipped} из {len(pdf_files)}")
-		logger.info(f"ИТОГО: обработано {processed}, пропущено {skipped}, всего {len(pdf_files)}")
+		logger.info(f"ИТОГО: обработано {processed}, пропущено {skipped}, ошибок {errors}, всего {len(pdf_files)}")
+		return { 'processed': processed, 'skipped': skipped, 'errors': errors, 'total': len(pdf_files), 'processed_files': processed_files }
 
 
 def main():
 	"""Основная функция для тестирования"""
 	processor = LegalDocumentProcessor()
 	# Обрабатываем все PDF файлы (по умолчанию безопасный режим: пропуск уже обработанных)
-	processor.process_all_pdfs()
+	summary = processor.process_all_pdfs()
+	logger.info(f"ИТОГО: обработано {summary['processed']}, пропущено {summary['skipped']}, ошибок {summary['errors']}, всего {summary['total']}")
 
 if __name__ == "__main__":
 	main()

@@ -1,0 +1,37 @@
+# GPU-accelerated requirements (PyTorch CUDA 12.1 build)
+# Ensure you have compatible NVIDIA driver and CUDA runtime installed.
+
+--index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
+
+# Core stack
+sentence-transformers
+chromadb
+numpy
+pandas
+
+# PDF
+PyMuPDF
+pdfplumber
+
+# API/Web
+fastapi
+uvicorn
+pydantic
+requests
+
+# Providers
+google-generativeai
+openai
+
+# Utils
+python-dotenv
+tqdm
+loguru
+jinja2
+
+# Dev
+pytest
+black

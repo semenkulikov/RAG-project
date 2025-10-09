@@ -19,13 +19,17 @@ requests
 # Google AI
 google-generativeai
 
+# OpenAI
+openai
+
 # Utilities
 python-dotenv
 tqdm
 loguru
+jinja2
 
 # Development
 pytest
 black
-openai
-jinja2
+
+# For GPU support, see requirements-gpu.txt

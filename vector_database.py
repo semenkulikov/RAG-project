@@ -12,9 +12,24 @@ from sentence_transformers import SentenceTransformer
 from loguru import logger
 from config import CHROMA_DB_PATH, VECTOR_COLLECTION_NAME, EMBEDDING_MODEL, TOP_K_RESULTS
 
+# Параметры производительности (можно подстроить под железо)
 INGEST_MANIFEST = os.path.join(CHROMA_DB_PATH, "ingested_files.txt")
-DEFAULT_TEXTS_BATCH = 1000  # количество чанков на партию эмбеддингов
-DEFAULT_FILES_BATCH = 25    # количество JSON файлов на партию
+DEFAULT_TEXTS_BATCH = 2000  # размер партии текстов для эмбеддинга (увеличено)
+DEFAULT_FILES_BATCH = 50    # количество JSON файлов на партию (увеличено)
+
+# Задействуем все доступные ядра BLAS/МКL (если не выставлено снаружи)
+os.environ.setdefault("OMP_NUM_THREADS", str(max(1, os.cpu_count() or 8)))
+os.environ.setdefault("MKL_NUM_THREADS", str(max(1, os.cpu_count() or 8)))
+try:
+	import torch
+	torch.set_num_threads(max(1, os.cpu_count() or 8))
+	_HAS_TORCH = True
+except Exception:
+	_HAS_TORCH = False
+
+device_str = "cpu"
+if _HAS_TORCH and hasattr(torch, "cuda") and torch.cuda.is_available():
+	device_str = "cuda"
 
 class VectorDatabase:
 	"""Класс для работы с векторной базой данных"""
@@ -76,19 +91,28 @@ class VectorDatabase:
 	
 	def load_embedding_model(self):
 		try:
-			logger.info(f"Загружаю модель эмбеддингов: {EMBEDDING_MODEL}")
-			self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+			logger.info(f"Загружаю модель эмбеддингов: {EMBEDDING_MODEL} (device={device_str})")
+			# sentence-transformers поддерживает параметр device
+			self.embedding_model = SentenceTransformer(EMBEDDING_MODEL, device=device_str)
 			logger.info("Модель эмбеддингов загружена успешно")
 		except Exception as e:
 			logger.error(f"Ошибка при загрузке модели эмбеддингов: {e}")
 			raise
 	
 	def _encode_batch(self, texts: List[str]) -> List[List[float]]:
-		embeddings = self.embedding_model.encode(texts, batch_size=64, convert_to_tensor=False, show_progress_bar=False)
+		# Увеличенные батчи, разные для CPU/GPU
+		batch_size = 256 if device_str == "cuda" else 128
+		embeddings = self.embedding_model.encode(
+			texts,
+			batch_size=batch_size,
+			convert_to_tensor=False,
+			show_progress_bar=False,
+			normalize_embeddings=False,
+		)
 		return embeddings.tolist()
 	
 	def add_documents(self, documents: List[Dict[str, Any]]):
-		"""Добавляет документы в коллекцию одним вызовом (для малых партий)."""
+		"""Добавляет документы в коллекцию батчами."""
 		if not documents:
 			logger.warning("Нет документов для добавления")
 			return
@@ -124,7 +148,6 @@ class VectorDatabase:
 		if not texts:
 			logger.warning("Нет текстов для векторизации")
 			return
-		# батч-эмбеддинг по текстам, чтобы не держать всё в памяти
 		added = 0
 		for start in range(0, len(texts), DEFAULT_TEXTS_BATCH):
 			end = min(start + DEFAULT_TEXTS_BATCH, len(texts))
@@ -134,7 +157,7 @@ class VectorDatabase:
 			embeddings = self._encode_batch(batch_texts)
 			self.collection.add(embeddings=embeddings, documents=batch_texts, metadatas=batch_metadatas, ids=batch_ids)
 			added += len(batch_texts)
-			if added % 1000 == 0:
+			if added % 5000 == 0:
 				logger.info(f"В коллекцию добавлено {added}/{len(texts)} фрагментов")
 		logger.info(f"Добавлено {len(texts)} документов в векторную базу")
 	
@@ -204,7 +227,6 @@ class VectorDatabase:
 				batch_docs.append(doc_data)
 				new_files.append(json_file)
 				loaded_files += 1
-				# если набрали партию по файлам
 				if loaded_files % files_batch == 0:
 					logger.info(f"Добавление партии: файлов {files_batch}, прогресс файлов {idx}/{len(json_files)}")
 					self.add_documents(batch_docs)
@@ -214,7 +236,6 @@ class VectorDatabase:
 			except Exception as e:
 				errors += 1
 				logger.error(f"Ошибка при загрузке {json_file}: {e}")
-		# добиваем остаток
 		if batch_docs:
 			logger.info(f"Добавление финальной партии: файлов {len(batch_docs)}")
 			self.add_documents(batch_docs)
@@ -228,8 +249,7 @@ def main():
 	logger.info("Инициализация векторной базы данных...")
 	vector_db = VectorDatabase()
 	from config import JSON_DIR
-	summary = vector_db.load_from_json_files(JSON_DIR)
-	logger.info(f"Сводка загрузки: {summary}")
+	vector_db.load_from_json_files(JSON_DIR)
 	info = vector_db.get_collection_info()
 	logger.info(f"Информация о коллекции: {info}")
 

@@ -178,36 +178,41 @@ class VectorDatabase:
 		Загружает документы из JSON в батчах с резюмом.
 		- Пропускает JSON файлы, которые уже были загружены ранее (манифест)
 		- Обрабатывает партиями, чтобы не держать всё в памяти
+		Возвращает сводку: { 'new_files': [...], 'loaded_files': int, 'skipped': int, 'errors': int, 'total': int }
 		"""
 		if not os.path.exists(json_dir):
 			logger.warning(f"Директория {json_dir} не существует")
-			return
+			return { 'new_files': [], 'loaded_files': 0, 'skipped': 0, 'errors': 0, 'total': 0 }
 		json_files = [f for f in os.listdir(json_dir) if f.endswith('.json')]
 		if not json_files:
 			logger.warning(f"JSON файлы не найдены в {json_dir}")
-			return
+			return { 'new_files': [], 'loaded_files': 0, 'skipped': 0, 'errors': 0, 'total': 0 }
 		logger.info(f"К загрузке JSON файлов: всего {len(json_files)}")
 		batch_docs: List[Dict[str, Any]] = []
 		loaded_files = 0
+		errors = 0
+		skipped = 0
+		new_files: List[str] = []
 		for idx, json_file in enumerate(json_files, 1):
 			if json_file in self._ingested:
-				if idx % 200 == 0:
-					logger.info(f"Пропущено ранее загруженных: {idx - loaded_files}")
+				skipped += 1
 				continue
 			json_path = os.path.join(json_dir, json_file)
 			try:
 				with open(json_path, 'r', encoding='utf-8') as f:
 					doc_data = json.load(f)
 				batch_docs.append(doc_data)
+				new_files.append(json_file)
 				loaded_files += 1
-				# если набрали партию по файлам или слишком много текстов
+				# если набрали партию по файлам
 				if loaded_files % files_batch == 0:
-					logger.info(f"Добавление партии: файлов {files_batch}, индекс {idx}/{len(json_files)}")
+					logger.info(f"Добавление партии: файлов {files_batch}, прогресс файлов {idx}/{len(json_files)}")
 					self.add_documents(batch_docs)
 					for d in batch_docs:
 						self._append_ingested(d.get('source_file', json_file))
 					batch_docs = []
 			except Exception as e:
+				errors += 1
 				logger.error(f"Ошибка при загрузке {json_file}: {e}")
 		# добиваем остаток
 		if batch_docs:
@@ -215,14 +220,16 @@ class VectorDatabase:
 			self.add_documents(batch_docs)
 			for d in batch_docs:
 				self._append_ingested(d.get('source_file', 'unknown'))
-		logger.info(f"Загружено новых JSON файлов: {loaded_files}. Всего отмечено как загруженные: {len(self._ingested)}")
+		logger.info(f"Сводка загрузки: новых файлов {loaded_files}, пропущено {skipped}, ошибок {errors}, всего {len(json_files)}")
+		return { 'new_files': new_files, 'loaded_files': loaded_files, 'skipped': skipped, 'errors': errors, 'total': len(json_files) }
 
 
 def main():
 	logger.info("Инициализация векторной базы данных...")
 	vector_db = VectorDatabase()
 	from config import JSON_DIR
-	vector_db.load_from_json_files(JSON_DIR)
+	summary = vector_db.load_from_json_files(JSON_DIR)
+	logger.info(f"Сводка загрузки: {summary}")
 	info = vector_db.get_collection_info()
 	logger.info(f"Информация о коллекции: {info}")
 

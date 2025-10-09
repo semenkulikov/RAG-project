@@ -46,13 +46,17 @@ vector_backend = {"type": "", "db": None}
 @app.on_event("startup")
 async def startup_event():
 	global vector_backend
+	load_json_on_start = os.getenv("LOAD_JSON_ON_START", "0").lower() in ("1", "true", "yes")
 	try:
 		vdb = VectorDatabase()
-		vdb.load_from_json_files(JSON_DIR)
+		# IMPORTANT: by default do NOT reload JSON on server start — attach to persisted collection for instant startup
+		if load_json_on_start:
+			vdb.load_from_json_files(JSON_DIR)
 		vector_backend = {"type": "chroma", "db": vdb}
 	except Exception:
 		svdb = SimpleVectorDatabase()
-		svdb.load_from_json_files(JSON_DIR)
+		if load_json_on_start:
+			svdb.load_from_json_files(JSON_DIR)
 		vector_backend = {"type": "tfidf", "db": svdb}
 
 @app.get("/", response_class=HTMLResponse)

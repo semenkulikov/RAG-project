@@ -44,7 +44,8 @@ def main():
     vector_db = VectorDatabase()
     
     # Загружаем JSON файлы
-    vector_db.load_from_json_files(JSON_DIR)
+    load_result = vector_db.load_from_json_files(JSON_DIR)
+    logger.info(f"📊 Результат загрузки: {load_result}")
     
     # Получаем статистику
     info = vector_db.get_collection_info()

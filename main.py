@@ -5,6 +5,7 @@ Main entry point for the application
 
 import os
 from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -17,12 +18,39 @@ from config import API_HOST, API_PORT, API_TITLE, API_VERSION, JSON_DIR
 from vector_database import VectorDatabase
 from simple_vector_db import SimpleVectorDatabase
 from gemini_integration import generate_legal_document
+from loguru import logger
+
+# Try to init full vector DB on startup; fallback to simple
+vector_backend = {"type": "", "db": None}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global vector_backend
+    load_json_on_start = os.getenv("LOAD_JSON_ON_START", "0").lower() in ("1", "true", "yes")
+    try:
+        vdb = VectorDatabase()
+        # IMPORTANT: by default do NOT reload JSON on server start — attach to persisted collection for instant startup
+        if load_json_on_start:
+            vdb.load_from_json_files(JSON_DIR)
+        vector_backend = {"type": "chroma", "db": vdb}
+    except Exception:
+        svdb = SimpleVectorDatabase()
+        if load_json_on_start:
+            svdb.load_from_json_files(JSON_DIR)
+        vector_backend = {"type": "tfidf", "db": svdb}
+    
+    yield
+    
+    # Shutdown
+    # Cleanup if needed
 
 # Initialize FastAPI app
 app = FastAPI(
 	title=API_TITLE,
 	version=API_VERSION,
 	description="MVP for generating legal documents using RAG architecture",
+	lifespan=lifespan
 )
 
 # CORS
@@ -39,25 +67,6 @@ os.makedirs("templates", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-
-# Try to init full vector DB on startup; fallback to simple
-vector_backend = {"type": "", "db": None}
-
-@app.on_event("startup")
-async def startup_event():
-	global vector_backend
-	load_json_on_start = os.getenv("LOAD_JSON_ON_START", "0").lower() in ("1", "true", "yes")
-	try:
-		vdb = VectorDatabase()
-		# IMPORTANT: by default do NOT reload JSON on server start — attach to persisted collection for instant startup
-		if load_json_on_start:
-			vdb.load_from_json_files(JSON_DIR)
-		vector_backend = {"type": "chroma", "db": vdb}
-	except Exception:
-		svdb = SimpleVectorDatabase()
-		if load_json_on_start:
-			svdb.load_from_json_files(JSON_DIR)
-		vector_backend = {"type": "tfidf", "db": svdb}
 
 @app.get("/", response_class=HTMLResponse)
 async def root_page(request: Request):
@@ -100,8 +109,15 @@ async def api_generate(payload: Dict[str, Any]):
 		dispute_type = "contract_dispute"
 	
 	# Используем фильтрацию по типу спора если доступна
+	similar = []
 	if hasattr(db, 'search_similar') and 'dispute_type' in db.search_similar.__code__.co_varnames:
+		# Сначала пробуем с фильтром
 		similar = db.search_similar(query, n_results=5, dispute_type=dispute_type)
+		
+		# Если не нашли с фильтром, пробуем без фильтра
+		if not similar and dispute_type:
+			logger.warning(f"Не найдено документов с фильтром {dispute_type}, пробую без фильтра")
+			similar = db.search_similar(query, n_results=5)
 	else:
 		similar = db.search_similar(query, n_results=5)
 	

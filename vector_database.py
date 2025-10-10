@@ -267,6 +267,7 @@ class VectorDatabase:
 			return { 'new_files': [], 'loaded_files': 0, 'skipped': 0, 'errors': 0, 'total': 0 }
 		logger.info(f"К загрузке JSON файлов: всего {len(json_files)}")
 		batch_docs: List[Dict[str, Any]] = []
+		batch_json_names: List[str] = []
 		loaded_files = 0
 		errors = 0
 		skipped = 0
@@ -280,22 +281,25 @@ class VectorDatabase:
 				with open(json_path, 'r', encoding='utf-8') as f:
 					doc_data = json.load(f)
 				batch_docs.append(doc_data)
+				batch_json_names.append(json_file)
 				new_files.append(json_file)
 				loaded_files += 1
 				if loaded_files % files_batch == 0:
 					logger.info(f"Добавление партии: файлов {files_batch}, прогресс файлов {idx}/{len(json_files)}")
 					self.add_documents(batch_docs)
-					for d in batch_docs:
-						self._append_ingested(d.get('source_file', json_file))
+					# фиксируем именно имена json-файлов в манифесте, чтобы skip работал корректно
+					for name in batch_json_names:
+						self._append_ingested(name)
 					batch_docs = []
+					batch_json_names = []
 			except Exception as e:
 				errors += 1
 				logger.error(f"Ошибка при загрузке {json_file}: {e}")
 		if batch_docs:
 			logger.info(f"Добавление финальной партии: файлов {len(batch_docs)}")
 			self.add_documents(batch_docs)
-			for d in batch_docs:
-				self._append_ingested(d.get('source_file', 'unknown'))
+			for name in batch_json_names:
+				self._append_ingested(name)
 		logger.info(f"Сводка загрузки: новых файлов {loaded_files}, пропущено {skipped}, ошибок {errors}, всего {len(json_files)}")
 		return { 'new_files': new_files, 'loaded_files': loaded_files, 'skipped': skipped, 'errors': errors, 'total': len(json_files) }
 

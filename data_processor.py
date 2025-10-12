@@ -3,20 +3,30 @@
 Извлекает текст из PDF, структурирует и подготавливает для векторизации
 """
 
+from chatgpt_chunker import ChatGPTChunker
+from config import PDF_DIR, JSON_DIR, DATA_DIR
+from typing import List, Dict, Any
+from loguru import logger
+import re
 import os
 import json
-import re
-from typing import List, Dict, Any
-import fitz  # PyMuPDF
-from pathlib import Path
-from loguru import logger
-from config import PDF_DIR, JSON_DIR, DATA_DIR
+import fitz
 
 class LegalDocumentProcessor:
 	"""Класс для обработки юридических документов"""
 	
-	def __init__(self):
+	def __init__(self, use_chatgpt_chunking: bool = True):
 		self.setup_logging()
+		self.use_chatgpt_chunking = use_chatgpt_chunking
+		if use_chatgpt_chunking:
+			try:
+				self.chatgpt_chunker = ChatGPTChunker()
+				logger.info("ChatGPT чанкование активировано")
+			except Exception as e:
+				logger.warning(f"Не удалось инициализировать ChatGPT чанкование: {e}")
+				self.use_chatgpt_chunking = False
+		else:
+			self.chatgpt_chunker = None
 		
 	def setup_logging(self):
 		"""Настройка логирования"""
@@ -230,43 +240,49 @@ class LegalDocumentProcessor:
 				})
 		return positions
 	
-	def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
+	def chunk_text(self, text: str, source_file: str = "unknown") -> List[Dict[str, Any]]:
 		"""
-		Разбивает текст на чанки для векторизации
+		Разбивает текст на семантические чанки
+		
+		Args:
+			text: Исходный текст
+			source_file: Имя исходного файла
+			
+		Returns:
+			Список чанков с метаданными
 		"""
+		if self.use_chatgpt_chunking and self.chatgpt_chunker:
+			try:
+				logger.info(f"Используем ChatGPT чанкование для {source_file}")
+				return self.chatgpt_chunker.chunk_document(text, source_file)
+			except Exception as e:
+				logger.error(f"Ошибка ChatGPT чанкования: {e}, переходим к резервному")
+		
+		# Резервное чанкование
+		return self.fallback_chunking(text, source_file)
+	
+	def fallback_chunking(self, text: str, source_file: str) -> List[Dict[str, Any]]:
+		"""Резервное чанкование по абзацам"""
 		chunks = []
 		paragraphs = text.split('\n\n')
-		current_chunk = ""
 		chunk_id = 0
+		
 		for paragraph in paragraphs:
 			paragraph = paragraph.strip()
-			if not paragraph:
-				continue
-			if len(paragraph) > chunk_size:
-				words = paragraph.split()
-				temp_chunk = ""
-				for word in words:
-					if len(temp_chunk + " " + word) > chunk_size:
-						if temp_chunk:
-							chunks.append({"id": chunk_id, "text": temp_chunk.strip(), "type": "legal_text", "length": len(temp_chunk)})
-							chunk_id += 1
-						temp_chunk = word
-					else:
-						temp_chunk += " " + word
-				if temp_chunk:
-					chunks.append({"id": chunk_id, "text": temp_chunk.strip(), "type": "legal_text", "length": len(temp_chunk)})
-					chunk_id += 1
-			else:
-				if len(current_chunk + " " + paragraph) <= chunk_size:
-					current_chunk += " " + paragraph
-				else:
-					if current_chunk.strip():
-						chunks.append({"id": chunk_id, "text": current_chunk.strip(), "type": "legal_text", "length": len(current_chunk)})
-						chunk_id += 1
-					current_chunk = paragraph
-		if current_chunk.strip():
-			chunks.append({"id": chunk_id, "text": current_chunk.strip(), "type": "legal_text", "length": len(current_chunk)})
-		logger.info(f"Создано {len(chunks)} чанков из текста")
+			if len(paragraph) > 100:  # Только значимые абзацы
+				chunks.append({
+					'id': f'{source_file}_chunk_{chunk_id}',
+					'text': paragraph,
+					'type': 'legal_text',
+					'title': f'Абзац {chunk_id + 1}',
+					'key_articles': [],
+					'legal_concepts': [],
+					'source_file': source_file,
+					'chunk_index': chunk_id
+				})
+				chunk_id += 1
+		
+		logger.info(f"Создано {len(chunks)} чанков (резервное чанкование)")
 		return chunks
 	
 	def process_pdf_to_json(self, pdf_path: str) -> Dict[str, Any]:
@@ -278,7 +294,7 @@ class LegalDocumentProcessor:
 			return {}
 		metadata = self.extract_legal_metadata(text)
 		legal_positions = self.extract_legal_positions(text)
-		chunks = self.chunk_text(text)
+		chunks = self.chunk_text(text, os.path.basename(pdf_path))
 		result = {
 			"metadata": metadata,
 			"legal_positions": legal_positions,

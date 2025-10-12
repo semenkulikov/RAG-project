@@ -30,75 +30,101 @@ else:
 	logger.warning("OPENAI_API_KEY is empty. OpenAI fallback will fail.")
 
 def compose_prompt(case_description: str, similar_docs: List[Dict[str, Any]], document_type: str = "исковое заявление") -> str:
-	"""Формирует промпт для LLM на основе найденных документов с улучшенной фильтрацией.
-	Ожидается, что similar_docs — это список словарей, как из VectorDatabase.search_similar.
-	"""
-	# Фильтруем документы по релевантности
+	"""Формирует специализированный промпт на основе образца Gemini 2.5 Pro"""
+	
+	# Фильтруем и структурируем документы
 	relevant_docs = []
-	for doc in similar_docs[:10]:  # Берем топ-10
+	for doc in similar_docs[:8]:  # Берем топ-8 для качества
 		meta = doc.get("metadata", {})
 		dispute_type = meta.get("dispute_type", "")
 		legal_area = meta.get("legal_area", "")
 		
-		# Приоритет потребительским спорам для данного случая
+		# Приоритет потребительским спорам
 		if "потребитель" in case_description.lower() or "товар" in case_description.lower():
 			if dispute_type == "consumer_protection" or "защита прав потребителей" in legal_area:
 				relevant_docs.append(doc)
 		else:
-			# Для других типов споров используем все документы
 			relevant_docs.append(doc)
 	
-	# Если не нашли специфичных документов, берем все
 	if not relevant_docs:
 		relevant_docs = similar_docs[:5]
 	
-	context_lines: List[str] = []
+	# Структурируем контекст по типам
+	context_sections = {
+		"factual_circumstances": [],
+		"legal_positions": [],
+		"citations": [],
+		"conclusions": []
+	}
+	
 	for i, doc in enumerate(relevant_docs, 1):
 		meta = doc.get("metadata", {})
-		source = meta.get("source_file", "unknown")
 		chunk_type = meta.get("chunk_type", "legal_text")
-		legal_area = meta.get("legal_area", "")
-		dispute_type = meta.get("dispute_type", "")
+		source = meta.get("source_file", "unknown")
 		
-		# Добавляем информацию о типе спора в контекст
-		type_info = f" ({legal_area}, {dispute_type})" if legal_area else ""
-		
-		context_lines.append(
-			f"Дело {i} (источник: {source}, тип: {chunk_type}{type_info}):\n{doc.get('text','')[:1500]}"
-		)
+		# Классифицируем по типу чанка
+		doc_text = doc.get('text', '')[:1200]
+		if chunk_type == "factual_circumstances":
+			context_sections["factual_circumstances"].append(f"Контекст {i} (из {source}):\n{doc_text}")
+		elif chunk_type == "legal_position":
+			context_sections["legal_positions"].append(f"Правовая позиция {i} (из {source}):\n{doc_text}")
+		elif "ст." in doc_text or "статья" in doc_text.lower():
+			context_sections["citations"].append(f"Цитата {i} (из {source}):\n{doc_text}")
+		else:
+			context_sections["conclusions"].append(f"Вывод {i} (из {source}):\n{doc_text}")
 	
-	context = "\n\n".join(context_lines) if context_lines else "Нет релевантного контекста"
+	# Формируем структурированный контекст
+	context_parts = []
+	if context_sections["factual_circumstances"]:
+		context_parts.append("ФАКТИЧЕСКИЕ ОБСТОЯТЕЛЬСТВА ИЗ СУДЕБНОЙ ПРАКТИКИ:\n" + "\n\n".join(context_sections["factual_circumstances"]))
+	if context_sections["legal_positions"]:
+		context_parts.append("ПРАВОВЫЕ ПОЗИЦИИ ВЕРХОВНОГО СУДА РФ:\n" + "\n\n".join(context_sections["legal_positions"]))
+	if context_sections["citations"]:
+		context_parts.append("ЦИТАТЫ ИЗ ЗАКОНОВ И ПОСТАНОВЛЕНИЙ:\n" + "\n\n".join(context_sections["citations"]))
+	if context_sections["conclusions"]:
+		context_parts.append("ВЫВОДЫ И РЕШЕНИЯ СУДОВ:\n" + "\n\n".join(context_sections["conclusions"]))
 	
-	# Определяем тип спора из описания дела
+	context = "\n\n".join(context_parts) if context_parts else "Нет релевантного контекста"
+	
+	# Определяем тип спора
 	case_lower = case_description.lower()
 	if any(keyword in case_lower for keyword in ["потребитель", "товар", "продавец", "недостаток", "качество"]):
 		dispute_category = "потребительский спор"
 		legal_framework = "Закон РФ 'О защите прав потребителей'"
-	elif any(keyword in case_lower for keyword in ["договор", "контракт", "обязательство"]):
-		dispute_category = "договорный спор"
-		legal_framework = "Гражданский кодекс РФ"
 	else:
 		dispute_category = "гражданский спор"
 		legal_framework = "соответствующее законодательство РФ"
 	
 	prompt = f"""
-Ты — опытный юрист-процессуалист. Составь {document_type} с подробной мотивировочной частью.
+Ты — элитный юрист-аналитик, специализирующийся на составлении процессуальных документов на основе судебной практики Верховного Суда РФ.
 
-ОБСТОЯТЕЛЬСТВА ДЕЛА:
+ЗАДАЧА: Подготовить проект {document_type} на основе следующих фактических обстоятельств.
+
+ФАКТИЧЕСКИЕ ОБСТОЯТЕЛЬСТВА КЛИЕНТА:
 {case_description}
 
 ТИП СПОРА: {dispute_category}
 ПРАВОВАЯ ОСНОВА: {legal_framework}
 
-РЕЛЕВАНТНАЯ СУДЕБНАЯ ПРАКТИКА (из найденных документов):
+АНАЛИТИЧЕСКАЯ СПРАВКА (релевантные правовые позиции из базы данных ВС РФ):
 {context}
 
-ТРЕБОВАНИЯ К ОТВЕТУ:
-1) Структура: вводная часть, обстоятельства, правовая квалификация, ссылки на нормы и позиции ВС РФ, просительная часть, приложения.
-2) В мотивировочной части опирайся ТОЛЬКО на приведенные релевантные выдержки; цитируй нормы и правовые позиции явно.
-3) Если найденные документы не относятся к данному типу спора, укажи это и используй общие принципы права.
-4) Стиль официальный, без воды. Русский язык. Укажи ссылки на источники (файл/позиция), если это уместно.
-5) Верни только финальный текст документа без пояснений.
+ИНСТРУКЦИИ:
+1. Внимательно изучи обстоятельства клиента и предоставленный контекст.
+2. Используй ТОЛЬКО информацию из предоставленной аналитической справки для формирования правовой позиции. Не придумывай ничего от себя и не используй свои общие знания.
+3. Критически оцени релевантность каждого контекста. Если какой-то из найденных фрагментов НЕ относится к делу, проигнорируй его и укажи в своих рассуждениях, почему ты его проигнорил.
+4. Напиши структурированное {document_type}, явно цитируя наиболее подходящие правовые позиции из контекста и ссылаясь на номера дел.
+5. В мотивировочной части максимально подробно раскрой суть нарушенного права и надлежащий способ его защиты судом.
+6. Объясни, что должен сделать суд и чем это предусмотрено законом.
+7. Стиль: официальный, убедительный, без воды. Русский язык.
+8. Верни только финальный текст документа без пояснений.
+
+СТРУКТУРА ДОКУМЕНТА:
+- Вводная часть (стороны, предмет спора)
+- Фактические обстоятельства дела
+- Правовое обоснование с цитатами из ВС РФ
+- Просительная часть
+- Приложения
 """
 	return prompt.strip()
 

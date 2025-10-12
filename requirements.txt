@@ -27,6 +27,7 @@ python-dotenv
 tqdm
 loguru
 jinja2
+python-docx>=1.2.0
 
 # Development
 pytest

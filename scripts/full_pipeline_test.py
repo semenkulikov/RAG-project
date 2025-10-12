@@ -44,7 +44,7 @@ class FullPipelineTest:
         
         # Создаем процессор
         print("\n📊 Инициализация процессора данных...")
-        self.processor = LegalDocumentProcessor()
+        self.processor = LegalDocumentProcessor(use_gemini_chunking=True)
         
         # Обрабатываем все PDF файлы
         print("🔄 Обработка PDF файлов...")

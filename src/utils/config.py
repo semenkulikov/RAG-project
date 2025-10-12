@@ -1,6 +1,7 @@
 """
 Configuration settings for RAG Legal Document Generator MVP
 """
+
 import os
 from dotenv import load_dotenv
 

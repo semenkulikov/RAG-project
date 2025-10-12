@@ -14,10 +14,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import API_HOST, API_PORT, API_TITLE, API_VERSION, JSON_DIR
-from vector_database import VectorDatabase
-from simple_vector_db import SimpleVectorDatabase
-from gemini_integration import generate_legal_document
+from src.utils.config import API_HOST, API_PORT, API_TITLE, API_VERSION, JSON_DIR
+from src.databases.vector_database import VectorDatabase
+from src.databases.simple_vector_db import SimpleVectorDatabase
+from src.integrations.gemini_integration import generate_legal_document
 from loguru import logger
 
 # Try to init full vector DB on startup; fallback to simple

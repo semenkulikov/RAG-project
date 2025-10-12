@@ -20,7 +20,7 @@ requests
 google-generativeai
 
 # OpenAI
-openai
+openai>=1.0.0
 
 # Utilities
 python-dotenv
@@ -28,6 +28,7 @@ tqdm
 loguru
 jinja2
 python-docx>=1.2.0
+aiofiles>=23.0.0
 
 # Development
 pytest

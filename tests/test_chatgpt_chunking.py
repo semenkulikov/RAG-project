@@ -10,7 +10,7 @@ from pathlib import Path
 # Добавляем текущую директорию в путь
 sys.path.append(str(Path(__file__).parent))
 
-from chatgpt_chunker import ChatGPTChunker
+from gemini_chunker import GeminiChunker
 from data_processor import LegalDocumentProcessor
 from loguru import logger
 
@@ -36,8 +36,8 @@ def test_chatgpt_chunking():
     
     logger.info("🧪 Тестирую ChatGPT чанкование...")
     
-    # Тестируем ChatGPT чанкование
-    chunker = ChatGPTChunker()
+    # Тестируем Gemini чанкование (с резервом на ChatGPT)
+    chunker = GeminiChunker()
     chunks = chunker.chunk_document(test_text, "test_document.pdf")
     
     logger.info(f"✅ Создано {len(chunks)} чанков:")
@@ -50,7 +50,7 @@ def test_chatgpt_chunking():
     
     # Тестируем интеграцию с data_processor
     logger.info("🔗 Тестирую интеграцию с data_processor...")
-    processor = LegalDocumentProcessor(use_chatgpt_chunking=True)
+    processor = LegalDocumentProcessor(use_gemini_chunking=True)
     chunks_from_processor = processor.chunk_text(test_text, "test_integration.pdf")
     
     logger.info(f"✅ Data processor создал {len(chunks_from_processor)} чанков")
@@ -65,7 +65,7 @@ def test_fallback_chunking():
     """Тестирует резервное чанкование"""
     logger.info("🔄 Тестирую резервное чанкование...")
     
-    processor = LegalDocumentProcessor(use_chatgpt_chunking=False)
+    processor = LegalDocumentProcessor(use_gemini_chunking=False)
     test_text = "Абзац 1.\n\nАбзац 2.\n\nАбзац 3."
     
     chunks = processor.fallback_chunking(test_text, "test_fallback.pdf")

@@ -34,7 +34,7 @@ def main():
     
     # 1. Обработка PDF с улучшенной разметкой
     logger.info("📄 Обрабатываю PDF файлы с улучшенной разметкой...")
-    processor = LegalDocumentProcessor()
+    processor = LegalDocumentProcessor(use_gemini_chunking=True)
     result = processor.process_all_pdfs(force=True)
     
     logger.info(f"✅ Обработка завершена: {result['processed']} файлов, {result['skipped']} пропущено, {result['errors']} ошибок")

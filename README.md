@@ -76,6 +76,51 @@ RAG-система, которая:
 
 **Оценка качества:** 9.5/10 (по мнению Gemini 2.5 Pro)
 
+### Структура проекта
+
+```
+RAG-project/
+├── src/                    # Исходный код
+│   ├── rag_system/         # Основная RAG система
+│   │   ├── __init__.py
+│   │   └── legal_document_generator.py
+│   ├── processors/         # Обработчики документов
+│   │   ├── __init__.py
+│   │   ├── data_processor.py
+│   │   ├── gemini_chunker.py
+│   │   └── chatgpt_chunker.py
+│   ├── databases/          # Векторные базы данных
+│   │   ├── __init__.py
+│   │   ├── vector_database.py
+│   │   └── simple_vector_db.py
+│   ├── integrations/       # Интеграции с API
+│   │   ├── __init__.py
+│   │   └── gemini_integration.py
+│   └── utils/              # Утилиты
+│       ├── __init__.py
+│       └── config.py
+├── tests/                  # Тесты
+│   ├── test_*.py
+│   └── compare_chunking_models.py
+├── scripts/                # Скрипты
+│   ├── async_reindex.py
+│   ├── reindex_with_improved_labeling.py
+│   └── full_pipeline_test.py
+├── docs/                   # Документация
+├── data/                   # Данные
+│   ├── pdfs/              # PDF документы
+│   ├── json/              # Обработанные JSON
+│   └── chroma_db/         # Векторная база
+├── templates/              # HTML шаблоны
+├── static/                # CSS стили
+├── logs/                  # Логи
+├── main.py                # Точка входа
+├── setup.py               # Установка пакета
+├── pyproject.toml         # Конфигурация проекта
+├── requirements.txt       # Зависимости
+└── README.md              # Документация
+```
+
 ### Технологический стек
 
 **Backend:**
@@ -174,7 +219,7 @@ GEMINI_API_KEY=your_api_key_here
 python quick_test.py
 
 # Запуск полного тестирования
-python full_pipeline_test.py
+python scripts/full_pipeline_test.py
 
 # Запуск API сервера
 python main.py
@@ -189,16 +234,22 @@ python quick_test.py
 
 ### Полное тестирование пайплайна
 ```bash
-python full_pipeline_test.py
+python scripts/full_pipeline_test.py
 ```
 
 ### Тестирование отдельных модулей
 ```bash
 # Тест обработки данных
-python test_data_processor.py
+python tests/test_data_processor.py
 
 # Тест векторной базы данных
-python test_vector_db.py
+python tests/test_vector_db.py
+
+# Асинхронная переиндексация (рекомендуется для больших корпусов)
+python scripts/async_reindex.py
+
+# Тестирование асинхронной обработки
+python tests/test_async_processing.py
 ```
 
 ## Использование
@@ -233,7 +284,7 @@ print(document)
 2) Запустите обработку и создание JSON:
 ```bash
 venv\Scripts\activate
-python full_pipeline_test.py  # создаст JSON и соберет БД (и проверит поиск)
+python scripts/full_pipeline_test.py  # создаст JSON и соберет БД (и проверит поиск)
 ```
 Альтернатива (быстрее, без тяжелой модели):
 ```bash
@@ -258,7 +309,7 @@ python main.py
 ## Полный тест всей системы
 ```bash
 venv\Scripts\activate
-python full_pipeline_test.py
+python scripts/full_pipeline_test.py
 ```
 Он выполняет: обработку PDF → JSON, сборку векторной БД (полной, при наличии) → поиск → микро-бенчмарк → отчет.
 

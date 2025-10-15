@@ -14,6 +14,8 @@ from processors import LegalDocumentProcessor
 from databases import VectorDatabase, SimpleVectorDatabase
 from integrations import generate_legal_document
 from utils.config import PDF_DIR, JSON_DIR, GEMINI_API_KEY, OPENAI_API_KEY
+from .strategic_retrieval import StrategicRetriever
+import google.generativeai as genai
 
 
 class LegalDocumentGenerator:
@@ -37,6 +39,21 @@ class LegalDocumentGenerator:
         self._init_vector_database()
 
         logger.info("✅ LegalDocumentGenerator инициализирован")
+
+        # Инициализируем стратегический ретривер и модель Gemini для финальной генерации
+        try:
+            self.strategic_retriever = StrategicRetriever(
+                db_path=JSON_DIR.replace("/json", "/chroma_db"),
+                collection_name="vs_rf_universal_practice",
+                api_key=GEMINI_API_KEY,
+            )
+        except Exception:
+            self.strategic_retriever = None
+        if GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+            self._gemini_model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        else:
+            self._gemini_model = None
 
     def _init_processor(self):
         """Инициализация процессора документов"""
@@ -163,6 +180,27 @@ class LegalDocumentGenerator:
                 "relevant_docs": [],
                 "status": "error",
             }
+
+    def generate_document_strategic(self, case_description: str) -> Dict[str, Any]:
+        """
+        Генерация финального документа с двухэтапным стратегическим поиском (про/контра)
+        и шаблоном мастер-промта под Gemini.
+        """
+        if not (self.strategic_retriever and self._gemini_model):
+            return {"status": "error", "document": "Gemini/Retriever is not configured"}
+
+        context = self.strategic_retriever.query(case_description)
+        prompt = (
+            "### ROLE ###\n"
+            "Ты — заслуженный юрист России, судья Верховного Суда в отставке. Твоя задача — составить проект безупречного процессуального документа. \n\n"
+            "### INPUT DATA ###\n\n"
+            f"Фактические обстоятельства: {case_description}\n\n"
+            f"Аргументы 'ЗА': {context.get('supporting_practice', [])}\n\n"
+            f"Аргументы 'ПРОТИВ': {context.get('rebuttal_practice', [])}\n\n"
+            "Выдай только итоговый текст документа."
+        )
+        resp = self._gemini_model.generate_content(prompt)
+        return {"status": "success", "document": (resp.text or "").strip(), "context": context}
 
     def search_documents(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """

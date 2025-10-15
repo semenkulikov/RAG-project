@@ -313,10 +313,92 @@ python scripts/full_pipeline_test.py
 ```
 Он выполняет: обработку PDF → JSON, сборку векторной БД (полной, при наличии) → поиск → микро-бенчмарк → отчет.
 
+## Переиндексация с использованием Gemini для чанкования документов
+
+```bash
+python scripts/async_reindex.py
+```
+
 ## Демо генерации через API провайдеров (CLI)
 ```bash
 venv\Scripts\activate
 python generate_demo.py
 ```
 Скрипт найдет релевантные фрагменты и сгенерирует документ через Gemini; при ошибке — через OpenAI.
+
+## Быстрый старт (обновлено)
+
+Ниже — краткая инструкция по запуску c учётом новых модулей (Gemini‑чанкование, стратегический поиск, стратегическая генерация).
+
+1) Установка и параметры окружения
+```bash
+python -m venv venv
+venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+
+# создайте .env в корне (или используйте переменные окружения)
+# минимум:
+# GEMINI_API_KEY=...
+# (опционально) OPENAI_API_KEY=...
+```
+
+2) Подготовка данных
+```bash
+# положите ваши PDF в папку
+data/pdfs/
+```
+
+3) Переиндексация (асинхронная, с пропуском уже обработанных)
+```bash
+python scripts/async_reindex.py
+```
+- Чанкование: приоритетно Gemini, при ошибке — ChatGPT, затем fallback по абзацам.
+- Кеш: результаты чанкования сохраняются, повторная обработка не тратит токены.
+
+4) Запуск веб‑приложения (если нужно GUI/API)
+```bash
+python main.py
+# Откройте http://localhost:8000/
+```
+
+5) Программная стратегическая генерация (новый метод)
+```python
+from src.rag_system.legal_document_generator import LegalDocumentGenerator
+
+gen = LegalDocumentGenerator()
+res = gen.generate_document_strategic(
+    "Муж-ИП занижает доход, прошу алименты в твердой сумме"
+)
+print(res["document"])  # итоговый юридический документ
+```
+
+6) Что изменилось архитектурно
+- Чанкование и кэш: `src/processors/gemini_chunker.py` (Gemini → ChatGPT → fallback)
+- Продвинутая структуризация: `src/processors/advanced_structuring.py`
+- Двухэтапный поиск (про/контра): `src/rag_system/strategic_retrieval.py`
+- Стратегическая генерация: метод `generate_document_strategic` в `src/rag_system/legal_document_generator.py`
+
+7) Частые вопросы
+- Где класть PDF? → `data/pdfs`
+- Где лежат JSON после обработки? → `data/json`
+- Где ChromaDB? → `data/chroma_db`
+- Как прервать обработку? → `Ctrl+C` (асинхронный скрипт завершится корректно и агрессивно закроет дочерние процессы)
+
+## Новый функционал
+
+- Продвинутая структуризация судебных актов: `src/processors/advanced_structuring.py`
+- Двухэтапный стратегический поиск (про/контра): `src/rag_system/strategic_retrieval.py`
+- Финальная генерация через стратегический промпт: метод `generate_document_strategic` в `src/rag_system/legal_document_generator.py`
+
+Пример вызова стратегической генерации:
+
+```python
+from src.rag_system.legal_document_generator import LegalDocumentGenerator
+
+gen = LegalDocumentGenerator()
+res = gen.generate_document_strategic(
+    "Муж-ИП занижает доход, прошу алименты в твердой сумме"
+)
+print(res["document"])
+```
 

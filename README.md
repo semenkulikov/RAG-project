@@ -298,6 +298,16 @@ python quick_test.py  # использует упрощенную TF-IDF БД
 GEMINI_API_KEY=...
 OPENAI_API_KEY=...
 ```
+
+**Тестирование API ключей:**
+```bash
+# Быстрая проверка Gemini API
+python quick_gemini_test.py
+
+# Полная диагностика API
+python test_gemini_api.py
+```
+
 2) Запуск:
 ```bash
 venv\Scripts\activate

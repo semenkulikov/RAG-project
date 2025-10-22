@@ -35,7 +35,7 @@ def test_gemini_api():
         genai.configure(api_key=api_key)
         
         # Создаем модель
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         logger.info("🔄 Тестируем подключение к Gemini API...")
         

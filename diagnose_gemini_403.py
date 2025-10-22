@@ -92,7 +92,7 @@ def test_direct_api_call():
         genai.configure(api_key=api_key)
         
         # Создаем модель
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         # Простой тест
         response = model.generate_content("Hi")

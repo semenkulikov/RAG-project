@@ -62,6 +62,12 @@ def test_gemini_api():
             logger.error("   2. Убедитесь, что ключ активен в Google AI Studio")
             logger.error("   3. Проверьте региональные ограничения")
             logger.error("   4. Включите биллинг если необходимо")
+            logger.error("")
+            logger.error("🔍 Запустите расширенную диагностику:")
+            logger.error("   python diagnose_gemini_403.py")
+            logger.error("")
+            logger.error("🌍 Проверьте регион:")
+            logger.error("   python check_gemini_region.py")
             
         elif "User location is not supported" in error_msg:
             logger.error("🌍 Проблема с регионом:")
